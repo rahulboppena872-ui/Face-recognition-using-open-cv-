@@ -1,0 +1,4 @@
+__pycache__/
+dataset/*
+models/trained_model.yml
+.env
