@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Attendance</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Face Recognition Attendance</h1>
+
+    <nav>
+        <a href="{{ url_for('admin') }}">Admin Enrollment</a>
+        <a href="{{ url_for('attendance') }}">Attendance</a>
+        <a href="{{ url_for('records') }}">Attendance Records</a>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div class="message {{ category }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endwith %}
+
+    <div class="card">
+
+        <h2>Mark Attendance</h2>
+
+        <p class="info">
+            Enter the student's Roll Number.
+            The camera will open automatically.
+        </p>
+
+        <form method="POST">
+
+            <label for="roll_no">
+                Student Roll Number
+            </label>
+
+            <input
+                type="number"
+                id="roll_no"
+                name="roll_no"
+                placeholder="Example: 1001"
+                required
+            >
+
+            <button type="submit">
+                Open Camera & Mark Attendance
+            </button>
+
+        </form>
+
+    </div>
+
+    <div class="card">
+
+        <h2>How It Works</h2>
+
+        <ol>
+            <li>Enter the student's roll number.</li>
+            <li>Click Open Camera & Mark Attendance.</li>
+            <li>The webcam starts.</li>
+            <li>The face is verified.</li>
+            <li>Attendance is saved in MySQL.</li>
+            <li>The camera automatically turns OFF.</li>
+        </ol>
+
+    </div>
+
+</div>
+
+</body>
+</html>
