@@ -427,7 +427,7 @@ def records():
                 u.name,
                 a.attendance_date,
                 a.attendance_time
-            FROM attendance a
+            FROM face_attendance a
 
             JOIN users u
                 ON a.user_id = u.id
@@ -513,7 +513,7 @@ def delete_user(user_id):
 
         cursor.execute(
             """
-            DELETE FROM attendance
+            DELETE FROM face_attendance
             WHERE user_id = %s
             """,
             (face_id,)
