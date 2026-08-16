@@ -1,14 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Attendance</title>
 
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
 </head>
+
 
 <body>
 
@@ -16,67 +26,509 @@
 
     <h1>Face Recognition Attendance</h1>
 
+
     <nav>
-        <a href="{{ url_for('admin') }}">Admin Enrollment</a>
-        <a href="{{ url_for('attendance') }}">Attendance</a>
-        <a href="{{ url_for('records') }}">Attendance Records</a>
+
+        <a href="{{ url_for('admin') }}">
+            Admin Enrollment
+        </a>
+
+        <a href="{{ url_for('attendance') }}">
+            Attendance
+        </a>
+
+        <a href="{{ url_for('records') }}">
+            Attendance Records
+        </a>
+
     </nav>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, message in messages %}
-            <div class="message {{ category }}">
-                {{ message }}
-            </div>
-        {% endfor %}
-    {% endwith %}
 
     <div class="card">
 
         <h2>Mark Attendance</h2>
 
-        <p class="info">
-            Enter the student's Roll Number.
-            The camera will open automatically.
-        </p>
 
-        <form method="POST">
+        <label for="rollNo">
+            Student Roll Number
+        </label>
 
-            <label for="roll_no">
-                Student Roll Number
-            </label>
 
-            <input
-                type="number"
-                id="roll_no"
-                name="roll_no"
-                placeholder="Example: 1001"
-                required
+        <input
+            type="number"
+            id="rollNo"
+            placeholder="Example: 1001"
+        >
+
+
+        <button
+            type="button"
+            id="startAttendance"
+        >
+            Open Camera & Mark Attendance
+        </button>
+
+
+        <div
+            id="cameraSection"
+            style="display:none; margin-top:20px;"
+        >
+
+            <video
+                id="video"
+                width="640"
+                height="480"
+                autoplay
+                playsinline
+                style="max-width:100%;"
+            ></video>
+
+
+            <canvas
+                id="canvas"
+                width="640"
+                height="480"
+                style="display:none;"
+            ></canvas>
+
+
+            <p id="status">
+                Starting camera...
+            </p>
+
+
+            <button
+                type="button"
+                id="stopCamera"
             >
-
-            <button type="submit">
-                Open Camera & Mark Attendance
+                Stop Camera
             </button>
 
-        </form>
+        </div>
 
     </div>
+
 
     <div class="card">
 
         <h2>How It Works</h2>
 
         <ol>
-            <li>Enter the student's roll number.</li>
-            <li>Click Open Camera & Mark Attendance.</li>
-            <li>The webcam starts.</li>
-            <li>The face is verified.</li>
-            <li>Attendance is saved in MySQL.</li>
-            <li>The camera automatically turns OFF.</li>
+
+            <li>
+                Enter the student's roll number.
+            </li>
+
+            <li>
+                Allow browser camera access.
+            </li>
+
+            <li>
+                Look at the camera.
+            </li>
+
+            <li>
+                Face is recognized using OpenCV.
+            </li>
+
+            <li>
+                Attendance is saved in MySQL.
+            </li>
+
+            <li>
+                Camera stays ON for 10 seconds after attendance.
+            </li>
+
         </ol>
 
     </div>
 
 </div>
 
+
+<script>
+
+const startButton =
+    document.getElementById(
+        "startAttendance"
+    );
+
+const stopButton =
+    document.getElementById(
+        "stopCamera"
+    );
+
+const rollInput =
+    document.getElementById(
+        "rollNo"
+    );
+
+const cameraSection =
+    document.getElementById(
+        "cameraSection"
+    );
+
+const video =
+    document.getElementById(
+        "video"
+    );
+
+const canvas =
+    document.getElementById(
+        "canvas"
+    );
+
+const statusText =
+    document.getElementById(
+        "status"
+    );
+
+
+let stream = null;
+
+let faceId = null;
+
+let recognizing = false;
+
+let attendanceMarked = false;
+
+let closingTimer = null;
+
+
+startButton.addEventListener(
+    "click",
+    startAttendance
+);
+
+
+async function startAttendance() {
+
+    const rollNo =
+        rollInput.value.trim();
+
+
+    if (!rollNo) {
+
+        alert(
+            "Please enter roll number."
+        );
+
+        return;
+    }
+
+
+    startButton.disabled = true;
+
+
+    try {
+
+        // Check student
+
+        const response =
+            await fetch(
+                "{{ url_for('attendance_start') }}",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        roll_no: rollNo
+                    })
+                }
+            );
+
+
+        const student =
+            await response.json();
+
+
+        if (!student.success) {
+
+            throw new Error(
+                student.message
+            );
+        }
+
+
+        faceId =
+            student.face_id;
+
+
+        // Open browser camera
+
+        stream =
+            await navigator.mediaDevices.getUserMedia(
+                {
+                    video: {
+                        width: 640,
+                        height: 480,
+                        facingMode: "user"
+                    },
+
+                    audio: false
+                }
+            );
+
+
+        video.srcObject =
+            stream;
+
+
+        cameraSection.style.display =
+            "block";
+
+
+        statusText.textContent =
+            `Looking for ${student.name}...`;
+
+
+        recognizing = true;
+
+        attendanceMarked = false;
+
+
+        recognizeLoop();
+
+
+    } catch (error) {
+
+        alert(
+            "Camera error: "
+            + error.message
+        );
+
+
+        startButton.disabled =
+            false;
+
+    }
+
+}
+
+
+async function recognizeLoop() {
+
+    if (!recognizing) {
+        return;
+    }
+
+
+    if (attendanceMarked) {
+        return;
+    }
+
+
+    const context =
+        canvas.getContext("2d");
+
+
+    context.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+
+    const image =
+        canvas.toDataURL(
+            "image/jpeg",
+            0.70
+        );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "{{ url_for('api_recognize') }}",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        face_id: faceId,
+                        image: image
+                    })
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (
+            result.success &&
+            result.recognized &&
+            (
+                result.attendance_marked ||
+                result.already_marked
+            )
+        ) {
+
+            attendanceMarked =
+                true;
+
+            recognizing = false;
+
+
+            if (
+                result.already_marked
+            ) {
+
+                statusText.textContent =
+                    "Attendance already marked today.";
+
+            } else {
+
+                statusText.textContent =
+                    "Attendance marked successfully!";
+
+            }
+
+
+            startTenSecondCountdown();
+
+
+            return;
+
+        }
+
+
+        if (
+            result.message ===
+            "Face not matched."
+        ) {
+
+            statusText.textContent =
+                "Face not matched. Please look at the camera.";
+
+        }
+
+
+    } catch (error) {
+
+        console.log(
+            "Recognition error:",
+            error
+        );
+
+    }
+
+
+    setTimeout(
+        recognizeLoop,
+        500
+    );
+
+}
+
+
+function startTenSecondCountdown() {
+
+    let remaining = 10;
+
+
+    const originalMessage =
+        statusText.textContent;
+
+
+    statusText.textContent =
+        `${originalMessage} Camera closing in ${remaining} seconds...`;
+
+
+    closingTimer =
+        setInterval(
+            function () {
+
+                remaining--;
+
+
+                if (remaining <= 0) {
+
+                    clearInterval(
+                        closingTimer
+                    );
+
+
+                    stopCamera();
+
+                    statusText.textContent =
+                        "Camera OFF.";
+
+                    return;
+                }
+
+
+                statusText.textContent =
+                    `${originalMessage} Camera closing in ${remaining} seconds...`;
+
+            },
+            1000
+        );
+
+}
+
+
+function stopCamera() {
+
+    recognizing = false;
+
+
+    if (closingTimer) {
+
+        clearInterval(
+            closingTimer
+        );
+
+        closingTimer = null;
+    }
+
+
+    if (stream) {
+
+        stream
+            .getTracks()
+            .forEach(
+                track => track.stop()
+            );
+
+        stream = null;
+    }
+
+
+    video.srcObject =
+        null;
+
+
+    cameraSection.style.display =
+        "block";
+
+
+    startButton.disabled =
+        false;
+
+}
+
+
+stopButton.addEventListener(
+    "click",
+    stopCamera
+);
+
+
+</script>
+
 </body>
+
 </html>

@@ -1,14 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Admin Enrollment</title>
 
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
 </head>
+
 
 <body>
 
@@ -16,56 +26,119 @@
 
     <h1>Face Recognition Attendance System</h1>
 
+
     <nav>
-        <a href="{{ url_for('admin') }}">Admin Enrollment</a>
-        <a href="{{ url_for('attendance') }}">Attendance</a>
-        <a href="{{ url_for('records') }}">Attendance Records</a>
+
+        <a href="{{ url_for('admin') }}">
+            Admin Enrollment
+        </a>
+
+        <a href="{{ url_for('attendance') }}">
+            Attendance
+        </a>
+
+        <a href="{{ url_for('records') }}">
+            Attendance Records
+        </a>
+
     </nav>
 
+
     {% with messages = get_flashed_messages(with_categories=true) %}
+
         {% for category, message in messages %}
+
             <div class="message {{ category }}">
                 {{ message }}
             </div>
+
         {% endfor %}
+
     {% endwith %}
 
 
+    <!-- ================================================== -->
     <!-- ENROLL STUDENT -->
+    <!-- ================================================== -->
 
     <div class="card">
 
         <h2>Enroll New Student</h2>
 
-        <form method="POST">
 
-            <label>Student Name</label>
+        <label>
+            Student Name
+        </label>
 
-            <input
-                type="text"
-                name="name"
-                placeholder="Enter student name"
-                required
+
+        <input
+            type="text"
+            id="studentName"
+            placeholder="Enter student name"
+        >
+
+
+        <button
+            type="button"
+            id="startEnrollment"
+        >
+            Start Camera Enrollment
+        </button>
+
+
+        <div
+            id="cameraSection"
+            style="display:none; margin-top:20px;"
+        >
+
+            <video
+                id="video"
+                width="640"
+                height="480"
+                autoplay
+                playsinline
+                style="max-width:100%;"
+            ></video>
+
+
+            <canvas
+                id="canvas"
+                width="640"
+                height="480"
+                style="display:none;"
+            ></canvas>
+
+
+            <p id="cameraStatus">
+                Starting camera...
+            </p>
+
+
+            <button
+                type="button"
+                id="stopCamera"
             >
-
-            <button type="submit">
-                Enroll Student
+                Stop Camera
             </button>
 
-        </form>
+        </div>
+
 
         <p class="info">
-            Roll number will be generated automatically.
+            The browser camera will capture 50 face images.
         </p>
 
     </div>
 
 
+    <!-- ================================================== -->
     <!-- REGISTERED STUDENTS -->
+    <!-- ================================================== -->
 
     <div class="card">
 
         <h2>Registered Students</h2>
+
 
         {% if students %}
 
@@ -74,13 +147,19 @@
             <thead>
 
                 <tr>
+
                     <th>Roll No</th>
+
                     <th>Name</th>
+
                     <th>Face ID</th>
+
                     <th>Action</th>
+
                 </tr>
 
             </thead>
+
 
             <tbody>
 
@@ -92,13 +171,16 @@
                         {{ student[1] }}
                     </td>
 
+
                     <td>
                         {{ student[2] }}
                     </td>
 
+
                     <td>
                         {{ student[0] }}
                     </td>
+
 
                     <td>
 
@@ -127,6 +209,7 @@
 
         </table>
 
+
         {% else %}
 
         <p class="info">
@@ -139,5 +222,355 @@
 
 </div>
 
+
+<script>
+
+const startButton =
+    document.getElementById("startEnrollment");
+
+const stopButton =
+    document.getElementById("stopCamera");
+
+const nameInput =
+    document.getElementById("studentName");
+
+const cameraSection =
+    document.getElementById("cameraSection");
+
+const video =
+    document.getElementById("video");
+
+const canvas =
+    document.getElementById("canvas");
+
+const statusText =
+    document.getElementById("cameraStatus");
+
+
+let stream = null;
+
+let userId = null;
+
+let captured = 0;
+
+let capturing = false;
+
+
+startButton.addEventListener(
+    "click",
+    async function () {
+
+        const name =
+            nameInput.value.trim();
+
+
+        if (!name) {
+
+            alert(
+                "Please enter student name."
+            );
+
+            return;
+        }
+
+
+        startButton.disabled = true;
+
+
+        try {
+
+            // Create student
+
+            const response =
+                await fetch(
+                    "{{ url_for('api_enroll') }}",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            name: name
+                        })
+                    }
+                );
+
+
+            const result =
+                await response.json();
+
+
+            if (!result.success) {
+
+                throw new Error(
+                    result.message
+                );
+            }
+
+
+            userId =
+                result.face_id;
+
+
+            captured = 0;
+
+
+            // Open browser camera
+
+            stream =
+                await navigator.mediaDevices.getUserMedia(
+                    {
+                        video: {
+                            width: 640,
+                            height: 480,
+                            facingMode: "user"
+                        },
+
+                        audio: false
+                    }
+                );
+
+
+            video.srcObject =
+                stream;
+
+
+            cameraSection.style.display =
+                "block";
+
+
+            statusText.textContent =
+                `Capturing faces: 0 / 50`;
+
+
+            capturing = true;
+
+
+            captureFaces();
+
+
+        } catch (error) {
+
+            alert(
+                "Camera/enrollment error: "
+                + error.message
+            );
+
+
+            startButton.disabled =
+                false;
+
+        }
+
+    }
+);
+
+
+async function captureFaces() {
+
+    if (!capturing) {
+        return;
+    }
+
+
+    if (captured >= 50) {
+
+        await finishEnrollment();
+
+        return;
+    }
+
+
+    const context =
+        canvas.getContext("2d");
+
+
+    context.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+
+    const image =
+        canvas.toDataURL(
+            "image/jpeg",
+            0.75
+        );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "{{ url_for('api_capture') }}",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        user_id: userId,
+                        image: image
+                    })
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (result.success) {
+
+            captured =
+                result.count;
+
+            statusText.textContent =
+                `Capturing faces: ${captured} / 50`;
+
+        }
+
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+
+    if (captured < 50) {
+
+        setTimeout(
+            captureFaces,
+            180
+        );
+
+    } else {
+
+        await finishEnrollment();
+
+    }
+
+}
+
+
+async function finishEnrollment() {
+
+    capturing = false;
+
+
+    statusText.textContent =
+        "Training face recognition model...";
+
+
+    try {
+
+        const response =
+            await fetch(
+                "{{ url_for('api_train') }}",
+                {
+                    method: "POST"
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (!result.success) {
+
+            throw new Error(
+                result.message
+            );
+        }
+
+
+        statusText.textContent =
+            "Enrollment completed successfully!";
+
+
+        alert(
+            "Student enrolled successfully!\n\n"
+            + "Roll No: "
+            + document.getElementById("studentName").value
+        );
+
+
+        stopCamera();
+
+
+        setTimeout(
+            function () {
+                location.reload();
+            },
+            1000
+        );
+
+
+    } catch (error) {
+
+        statusText.textContent =
+            "Training failed.";
+
+        alert(
+            "Training error: "
+            + error.message
+        );
+
+    }
+
+}
+
+
+function stopCamera() {
+
+    capturing = false;
+
+
+    if (stream) {
+
+        stream
+            .getTracks()
+            .forEach(
+                track => track.stop()
+            );
+
+        stream = null;
+    }
+
+
+    video.srcObject =
+        null;
+
+
+    cameraSection.style.display =
+        "none";
+
+
+    startButton.disabled =
+        false;
+
+}
+
+
+stopButton.addEventListener(
+    "click",
+    stopCamera
+);
+
+
+</script>
+
 </body>
+
 </html>
