@@ -1,69 +1,166 @@
 import cv2
+import os
 import sys
+import time
 from datetime import datetime
+
 from db_connection import get_connection
 
 
-MODEL_PATH = "models/trained_model.yml"
-CONFIDENCE_THRESHOLD = 60
+# ============================================================
+# SETTINGS
+# ============================================================
+
+FACE_ID = int(sys.argv[1]) if len(sys.argv) > 1 else None
+
+if FACE_ID is None:
+    print("Error: Face ID is required.")
+    print("Usage: python src/recognize_face.py <face_id>")
+    sys.exit(1)
 
 
-# -----------------------------
-# Get student from database
-# -----------------------------
-def get_user(user_id):
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "models",
+    "trained_model.yml"
+)
+
+CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+
+
+# ============================================================
+# CHECK MODEL
+# ============================================================
+
+if not os.path.exists(MODEL_PATH):
+    print("Error: Trained model not found.")
+    print(f"Expected location: {MODEL_PATH}")
+    print()
+    print("Run:")
+    print("python src/train_model.py")
+    sys.exit(1)
+
+
+# ============================================================
+# GET STUDENT INFORMATION
+# ============================================================
+
+conn = None
+cursor = None
+
+try:
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    try:
-        cursor.execute(
-            "SELECT id, name, roll_no FROM users WHERE id = %s",
-            (user_id,)
-        )
+    cursor.execute(
+        """
+        SELECT id, roll_no, name
+        FROM users
+        WHERE id = %s
+        """,
+        (FACE_ID,)
+    )
 
-        return cursor.fetchone()
+    student = cursor.fetchone()
 
-    finally:
+finally:
+
+    if cursor:
         cursor.close()
+
+    if conn:
         conn.close()
 
 
-# -----------------------------
-# Mark attendance
-# -----------------------------
+if not student:
+
+    print(f"Error: User ID {FACE_ID} does not exist.")
+    sys.exit(1)
+
+
+user_id = student[0]
+roll_no = student[1]
+student_name = student[2]
+
+
+print()
+print("==========================================")
+print("   FACE RECOGNITION ATTENDANCE")
+print("==========================================")
+print(f"Student : {student_name}")
+print(f"Roll No : {roll_no}")
+print(f"Face ID : {user_id}")
+print("==========================================")
+print()
+
+
+# ============================================================
+# MARK ATTENDANCE
+# ============================================================
+
 def mark_attendance(user_id):
 
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    today = datetime.now().date()
-    current_time = datetime.now().time()
+    conn = None
+    cursor = None
 
     try:
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        today = datetime.now().date()
+        current_time = datetime.now().time()
+
+        # ----------------------------------------------------
+        # Check whether attendance already exists today
+        # ----------------------------------------------------
 
         cursor.execute(
             """
             SELECT id
-            FROM attendance
+            FROM face_attendance
             WHERE user_id = %s
             AND attendance_date = %s
             """,
-            (user_id, today)
+            (
+                user_id,
+                today
+            )
         )
 
-        existing = cursor.fetchone()
+        existing_record = cursor.fetchone()
 
-        if existing:
-            return "Already Present"
+        if existing_record:
+
+            return "Already Marked"
+
+        # ----------------------------------------------------
+        # Insert attendance
+        # ----------------------------------------------------
 
         cursor.execute(
             """
-            INSERT INTO attendance
-            (user_id, attendance_date, attendance_time)
-            VALUES (%s, %s, %s)
+            INSERT INTO face_attendance
+            (
+                user_id,
+                attendance_date,
+                attendance_time
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s
+            )
             """,
-            (user_id, today, current_time)
+            (
+                user_id,
+                today,
+                current_time
+            )
         )
 
         conn.commit()
@@ -72,142 +169,111 @@ def mark_attendance(user_id):
 
     except Exception as e:
 
-        conn.rollback()
+        if conn:
+            conn.rollback()
 
-        print("Database error:", e)
+        print()
+        print(f"Attendance database error: {e}")
+        print()
 
         return "Database Error"
 
     finally:
 
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()
 
 
-# -----------------------------
-# Get Face ID
-# -----------------------------
-if len(sys.argv) >= 2:
+# ============================================================
+# LOAD HAAR CASCADE
+# ============================================================
 
-    user_id = sys.argv[1].strip()
+face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 
-else:
+if face_cascade.empty():
 
-    user_id = input("Enter Student ID: ").strip()
-
-
-if not user_id.isdigit():
-
-    print("Invalid Student ID.")
-
+    print("Error: Haar Cascade could not be loaded.")
     sys.exit(1)
 
 
-user_id = int(user_id)
+# ============================================================
+# LOAD LBPH MODEL
+# ============================================================
 
-
-# -----------------------------
-# Check student
-# -----------------------------
-user = get_user(user_id)
-
-
-if user is None:
-
-    print(
-        f"Student ID {user_id} "
-        f"was not found."
-    )
-
-    sys.exit(1)
-
-
-user_id = user[0]
-user_name = user[1]
-roll_no = user[2]
-
-
-print()
-print(f"Student: {user_name}")
-print(f"Roll No: {roll_no}")
-print(f"Face ID: {user_id}")
-print()
-print("Opening camera...")
-print("Look at the camera.")
-print()
-
-
-# -----------------------------
-# Load LBPH model
-# -----------------------------
 try:
 
-    model = cv2.face.LBPHFaceRecognizer_create()
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
 
-    model.read(MODEL_PATH)
+except AttributeError:
+
+    print()
+    print("Error: OpenCV face module is not available.")
+    print()
+    print("Install:")
+    print("pip install opencv-contrib-python")
+    sys.exit(1)
+
+
+try:
+
+    recognizer.read(MODEL_PATH)
 
 except Exception as e:
 
-    print(
-        "Error loading trained model:",
-        e
-    )
-
+    print(f"Error loading trained model: {e}")
     sys.exit(1)
 
 
-# -----------------------------
-# Load Haar Cascade
-# -----------------------------
-face_classifier = cv2.CascadeClassifier(
-    cv2.data.haarcascades +
-    "haarcascade_frontalface_default.xml"
-)
+# ============================================================
+# OPEN CAMERA
+# ============================================================
 
-
-if face_classifier.empty():
-
-    print(
-        "Error: Haar Cascade "
-        "could not be loaded."
-    )
-
-    sys.exit(1)
-
-
-# -----------------------------
-# Open camera
-# -----------------------------
 cap = cv2.VideoCapture(0)
-
 
 if not cap.isOpened():
 
-    print(
-        "Error: Could not open webcam."
-    )
+    print()
+    print("Error: Could not open camera.")
+    print("Make sure your webcam is connected.")
+    print()
 
     sys.exit(1)
 
 
+# ============================================================
+# CAMERA SETTINGS
+# ============================================================
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+
 attendance_completed = False
+attendance_completed_time = None
+
+attendance_message = ""
 
 
-# -----------------------------
-# Face recognition
-# -----------------------------
+# ============================================================
+# FACE RECOGNITION LOOP
+# ============================================================
+
 while True:
 
     ret, frame = cap.read()
 
     if not ret:
 
-        print(
-            "Error: Could not read webcam."
-        )
-
+        print("Error: Could not read camera frame.")
         break
 
+
+    # --------------------------------------------------------
+    # Convert frame to grayscale
+    # --------------------------------------------------------
 
     gray = cv2.cvtColor(
         frame,
@@ -215,7 +281,11 @@ while True:
     )
 
 
-    faces = face_classifier.detectMultiScale(
+    # --------------------------------------------------------
+    # Detect faces
+    # --------------------------------------------------------
+
+    faces = face_cascade.detectMultiScale(
         gray,
         scaleFactor=1.3,
         minNeighbors=5,
@@ -223,49 +293,45 @@ while True:
     )
 
 
+    # --------------------------------------------------------
+    # Process detected faces
+    # --------------------------------------------------------
+
     for (x, y, w, h) in faces:
 
-        face = gray[
+        face_region = gray[
             y:y + h,
             x:x + w
         ]
 
 
+        # ----------------------------------------------------
+        # Recognize face
+        # ----------------------------------------------------
+
         try:
 
-            predicted_id, distance = model.predict(
-                face
+            predicted_id, confidence = recognizer.predict(
+                face_region
             )
 
         except Exception:
 
-            continue
+            predicted_id = -1
+            confidence = 999
 
 
-        # -----------------------------
-        # Correct student
-        # -----------------------------
-        if (
-            predicted_id == user_id
-            and distance <= CONFIDENCE_THRESHOLD
-        ):
+        # LBPH confidence:
+        # Lower = better match
+        #
+        # 100 is used as a reasonable threshold.
+        # You can make this stricter later.
 
-            status = mark_attendance(
-                user_id
-            )
+        if predicted_id == FACE_ID and confidence < 100:
 
-
-            print(
-                f"User: {user_name} | "
-                f"Roll No: {roll_no} | "
-                f"Face ID: {user_id} | "
-                f"Distance: {distance:.2f}"
-            )
-
-            print(
-                f"Status: {status}"
-            )
-
+            # ------------------------------------------------
+            # Face matched
+            # ------------------------------------------------
 
             cv2.rectangle(
                 frame,
@@ -278,10 +344,10 @@ while True:
 
             cv2.putText(
                 frame,
-                user_name,
-                (x, y - 45),
+                student_name,
+                (x, y - 35),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
+                0.8,
                 (0, 255, 0),
                 2
             )
@@ -289,8 +355,8 @@ while True:
 
             cv2.putText(
                 frame,
-                status,
-                (x, y - 15),
+                f"Roll No: {roll_no}",
+                (x, y - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 0),
@@ -298,25 +364,27 @@ while True:
             )
 
 
-            cv2.imshow(
-                "Face Recognition Attendance",
-                frame
-            )
+            # -----------------------------------------------
+            # Mark attendance only once
+            # -----------------------------------------------
+
+            if not attendance_completed:
+
+                attendance_message = mark_attendance(
+                    user_id
+                )
+
+                attendance_completed = True
+
+                # Start the 10-second timer
+                attendance_completed_time = time.time()
 
 
-            # Keep result visible for 2 seconds
-            cv2.waitKey(2000)
-
-
-            attendance_completed = True
-
-            break
-
-
-        # -----------------------------
-        # Wrong student
-        # -----------------------------
         else:
+
+            # ------------------------------------------------
+            # Wrong student
+            # ------------------------------------------------
 
             cv2.rectangle(
                 frame,
@@ -338,13 +406,92 @@ while True:
             )
 
 
-    # -----------------------------
-    # Automatically stop
-    # -----------------------------
+    # ========================================================
+    # AFTER ATTENDANCE IS MARKED
+    # KEEP CAMERA ON FOR 10 SECONDS
+    # ========================================================
+
     if attendance_completed:
 
-        break
+        elapsed_time = (
+            time.time()
+            - attendance_completed_time
+        )
 
+        remaining_time = max(
+            0,
+            10 - int(elapsed_time)
+        )
+
+
+        # ----------------------------------------------------
+        # Success message
+        # ----------------------------------------------------
+
+        if attendance_message == "Attendance Marked":
+
+            message = "Attendance Marked Successfully!"
+
+        elif attendance_message == "Already Marked":
+
+            message = "Attendance Already Marked Today"
+
+        else:
+
+            message = attendance_message
+
+
+        cv2.putText(
+            frame,
+            message,
+            (30, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.75,
+            (0, 255, 0),
+            2
+        )
+
+
+        cv2.putText(
+            frame,
+            f"Camera closing in {remaining_time} seconds...",
+            (30, 75),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2
+        )
+
+
+        # ----------------------------------------------------
+        # Close after 10 seconds
+        # ----------------------------------------------------
+
+        if elapsed_time >= 10:
+
+            break
+
+
+    else:
+
+        # ----------------------------------------------------
+        # Normal camera message
+        # ----------------------------------------------------
+
+        cv2.putText(
+            frame,
+            "Look at the camera",
+            (30, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.75,
+            (255, 255, 255),
+            2
+        )
+
+
+    # ========================================================
+    # SHOW CAMERA
+    # ========================================================
 
     cv2.imshow(
         "Face Recognition Attendance",
@@ -352,20 +499,28 @@ while True:
     )
 
 
-    # ENTER = manual exit
-    if cv2.waitKey(1) & 0xFF == 13:
+    # ========================================================
+    # ENTER = MANUAL EXIT
+    # ========================================================
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == 13:
 
         break
 
 
-# -----------------------------
-# Camera OFF
-# -----------------------------
+# ============================================================
+# CAMERA OFF
+# ============================================================
+
 cap.release()
 
 cv2.destroyAllWindows()
 
 
 print()
+print("==========================================")
 print("Camera OFF.")
 print("Attendance process completed.")
+print("==========================================")
