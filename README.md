@@ -2,8 +2,15 @@ cognition_Attendance_README.md
 
 
 Face Recognition Attendance System using OpenCV, Python, Flask & MySQL
-🚀 Live Demo
-Live Demo: https://smart-academic-management-system-production-54e0.up.railway.app/
+## 🌐 Live Demo
+
+### 🚀 Railway Deployment
+
+**Primary Live Application:**  
+https://face-recognition-using-open-cv-production-8659.up.railway.app
+
+**Alternative Railway URL:**  
+https://face-recognition-using-open-cv-production.up.railway.appt-academic-management-system-production-54e0.up.railway.app/
 
 A real-time Face Recognition Attendance System built using Python, OpenCV, Flask, LBPH Face Recognition, and MySQL.
 
